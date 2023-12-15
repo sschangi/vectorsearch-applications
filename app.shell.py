@@ -3,7 +3,7 @@ from weaviate_interface import WeaviateClient, WhereFilter
 from prompt_templates import question_answering_prompt_series, question_answering_system
 from openai_interface import GPT_Turbo
 from app_features import (convert_seconds, generate_prompt_series, search_result,
-                          validate_token_threshold, load_content_cache, load_data)
+                          validate_token_threshold, load_data)
 from reranker import ReRanker
 from loguru import logger 
 import streamlit as st
@@ -45,9 +45,6 @@ encoding = encoding_for_model(model_name)
 
 ## DATA and CACHE
 data_path = 'data/impact_theory_data.json'
-cache_path = 'data/impact-theory-minilmL6-256.parquet'
-
-cache = load_content_cache(cache_path)
 
 ## INDEX NAME
 
@@ -60,7 +57,12 @@ guest_list = sorted(list(set([d['guest'] for d in data])))
 
 def main():
     with st.sidebar:
+        filter_guest_checkbox = st.checkbox('Filter Guest')
         guest_input = st.selectbox('Select Guest', options=guest_list, index=None, placeholder='Select Guest')
+        guest_filter = None
+        if filter_guest_checkbox:
+            guest_filter = WhereFilter(path=['guest'], operator='Equal', valueText=guest_input).todict()
+
         alpha_input = st.slider('Alpha for Hybrid Search', 0.00, 1.00, 0.30, step=0.05)
         retrieval_limit = st.slider('Hybrid Search Retrieval Results', 10, 300, 10, step=10)
         reranker_topk = st.slider('Reranker Top K', 1, 5, 3, step=1)
@@ -69,8 +71,10 @@ def main():
 
     if class_name == 'Ada_data_256':
         client = WeaviateClient(api_key, url, model_name_or_path='text-embedding-ada-002', openai_api_key=os.environ['OPENAI_API_KEY'])
-    else:
+    elif class_name == 'Impact_theory_minilm_256':
         client = WeaviateClient(api_key, url)
+    else:
+        client = WeaviateClient(api_key, url, model_name_or_path='./models/finetuned-all-MiniLM-L6-v2-300')
 
     client.display_properties.append('summary')
 
@@ -86,13 +90,6 @@ def main():
             ##############
             # START CODE #
             ##############
-
-            st.write('Hmmm...this app does not seem to be working yet.  Please check back later.')
-            if guest_input:
-                st.write(f'However, it looks like you selected {guest_input} as a filter.')
-
-                guest_filter = WhereFilter(path=['guest'], operator='Equal', valueText=guest_input).todict()
-                logger.info(client)
                 
             # make hybrid call to weaviate
             hybrid_response = client.hybrid_search(query,
@@ -107,7 +104,6 @@ def main():
                                               apply_sigmoid=True,
                                               top_k=reranker_topk)
             
-            # expanded_response = expand_content(ranked_response, cache, content_key='doc_id', create_new_list)
             
             # validate token count is below threshold
             token_threshold = 8000 if model_name == model_ids[0] else 3500
